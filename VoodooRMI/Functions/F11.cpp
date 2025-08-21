@@ -111,15 +111,14 @@ void F11::attention(AbsoluteTime time, UInt8 *data[], size_t *size)
 
 int F11::config()
 {
-    return f11_write_control_regs(&sens_query, &dev_controls, getQryAddr());
+    return f11_write_control_regs(&dev_controls);
 }
 
-int F11::f11_read_control_regs(f11_2d_ctrl *ctrl, UInt16 ctrl_base_addr)
+int F11::f11_read_control_regs(f11_2d_ctrl *ctrl)
 {
     int error = 0;
     
-    ctrl->ctrl0_11_address = ctrl_base_addr;
-    error = readBlock(ctrl_base_addr, ctrl->ctrl0_11, RMI_F11_CTRL_REG_COUNT);
+    error = readBlock(getCtrlAddr(), ctrl->ctrl0_11, RMI_F11_CTRL_REG_COUNT);
     if (error < 0) {
         IOLogError("Failed to read ctrl0, code: %d.", error);
         return error;
@@ -128,17 +127,9 @@ int F11::f11_read_control_regs(f11_2d_ctrl *ctrl, UInt16 ctrl_base_addr)
     return 0;
 }
 
-int F11::f11_write_control_regs(f11_2d_sensor_queries *query,
-                                f11_2d_ctrl *ctrl,
-                                UInt16 ctrl_base_addr)
+int F11::f11_write_control_regs(f11_2d_ctrl *ctrl)
 {
-    int error;
-    
-    error = writeBlock(ctrl_base_addr, ctrl->ctrl0_11, RMI_F11_CTRL_REG_COUNT);
-    if (error < 0)
-        return error;
-    
-    return 0;
+    return writeBlock(getCtrlAddr(), ctrl->ctrl0_11, sizeof(ctrl->ctrl0_11));
 }
 
 int F11::f11_2d_construct_data()
@@ -643,12 +634,14 @@ int F11::rmi_f11_initialize()
     if (has_acm)
         attn_size += nbr_fingers * 2;
     
-    rc = f11_read_control_regs(&dev_controls,
-                               control_base_addr);
+    rc = f11_read_control_regs(&dev_controls);
     if (rc < 0) {
         IOLogError("Failed to read F11 control params.");
         return rc;
     }
+    
+    /* Continuous data reporting */
+    dev_controls.ctrl0_11[0] &= ~0x7;
     
     if (sens_query.has_dribble) {
         // RMI_REG_STATE_OFF
@@ -660,8 +653,7 @@ int F11::rmi_f11_initialize()
         dev_controls.ctrl0_11[11] &= ~BIT(0);
     }
     
-    rc = f11_write_control_regs(&sens_query,
-                                &dev_controls, getCtrlAddr());
+    rc = f11_write_control_regs(&dev_controls);
     if (rc)
         IOLogError("F11: Failed to write control registers");
     

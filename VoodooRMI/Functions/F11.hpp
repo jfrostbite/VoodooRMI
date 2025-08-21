@@ -539,10 +539,8 @@ private:
     int rmi_f11_initialize();
     int rmi_f11_get_query_parameters(f11_2d_sensor_queries *sensor_query,
                                       UInt16 query_base_addr);
-    int f11_read_control_regs(f11_2d_ctrl *ctrl, UInt16 ctrl_base_addr);
-    int f11_write_control_regs(f11_2d_sensor_queries *query,
-                               f11_2d_ctrl *ctrl,
-                               UInt16 ctrl_base_addr);
+    int f11_read_control_regs(f11_2d_ctrl *ctrl);
+    int f11_write_control_regs(f11_2d_ctrl *ctrl);
     int f11_2d_construct_data();
     
     inline UInt8 rmi_f11_parse_finger_state(UInt8 n_finger)
