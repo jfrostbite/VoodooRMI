@@ -254,6 +254,9 @@ void RMIBus::updateConfiguration(OSDictionary *dictionary) {
   update |= Configuration::loadBoolConfiguration(
       dictionary, "CoordinateSmoothingEnabled",
       &conf.coordinateSmoothingEnabled);
+  update |= Configuration::loadUInt64Configuration(
+      dictionary, "DisableWhileTypingNewTouchTimeout",
+      &conf.disableWhileTypingNewTouchTimeout);
 
   if (update) {
     IOLogDebug("Updating Configuration");

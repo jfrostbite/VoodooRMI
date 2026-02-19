@@ -118,7 +118,33 @@ IOReturn RMITrackpadFunction::message(UInt32 type, IOService *provider,
 }
 
 bool RMITrackpadFunction::shouldDiscardReport(AbsoluteTime timestamp) {
-  return !trackpadEnable;
+  if (!trackpadEnable)
+    return true;
+
+  // During typing, check if ALL fingers are new (none were active before).
+  // If so, and we're within the new-touch blocking window, discard completely.
+  const RmiConfiguration &conf = getConfiguration();
+  uint64_t tsNano;
+  absolutetime_to_nanoseconds(timestamp, &tsNano);
+
+  if ((tsNano - lastKeyboardTS) <
+      (conf.disableWhileTypingNewTouchTimeout * MILLI_TO_NANO)) {
+    // Check if any finger was already active/valid before this report
+    bool anyExistingFinger = false;
+    for (size_t i = 0; i < MAX_FINGERS; i++) {
+      if (fingerState[i] == RMI_FINGER_VALID ||
+          fingerState[i] == RMI_FINGER_FORCE_TOUCH) {
+        anyExistingFinger = true;
+        break;
+      }
+    }
+    // If no finger was already active, discard this entire report
+    // (new touch attempt during typing)
+    if (!anyExistingFinger)
+      return true;
+  }
+
+  return false;
 }
 
 // Returns zone that finger is in (or 0 if not in a zone)
@@ -397,10 +423,13 @@ MT2FingerType RMITrackpadFunction::getFingerType() {
 
 /**
  * RMI2DSensor::invalidateFingers
- * Invalidate fingers which are in zones currently
+ * Invalidate fingers which are in zones currently,
+ * or have palm-like characteristics during typing.
  * Used when keyboard or trackpoint send events
  */
 void RMITrackpadFunction::invalidateFingers() {
+  const RmiConfiguration &conf = getConfiguration();
+
   for (size_t i = 0; i < MAX_FINGERS; i++) {
     VoodooInputTransducer &finger = inputEvent.transducers[i];
 
@@ -408,8 +437,25 @@ void RMITrackpadFunction::invalidateFingers() {
         fingerState[i] == RMI_FINGER_INVALID)
       continue;
 
-    if (checkInZone(finger) > 0)
+    // Always invalidate fingers in rejection zones
+    if (checkInZone(finger) > 0) {
       fingerState[i] = RMI_FINGER_INVALID;
+      continue;
+    }
+
+    // During typing, also invalidate fingers with palm-like characteristics
+    // (high pressure / large contact area) even outside zones
+    if (trackedFingers[i].active) {
+      rmi_2d_sensor_abs_object fakeObj{};
+      // Use the tracked raw data to check z/wx/wy
+      // We check if the touch looks palm-like based on pressure
+      if (finger.currentCoordinates.width > (double)(RMI_2D_MAX_Z / 2) / 2.0) {
+        IOLogDebug(
+            "Invalidating palm-like finger %ld during typing (width=%.1f)", i,
+            finger.currentCoordinates.width);
+        fingerState[i] = RMI_FINGER_INVALID;
+      }
+    }
   }
 }
 
