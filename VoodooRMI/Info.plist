@@ -50,6 +50,10 @@
 				<integer>30</integer>
 				<key>TrackpointScrollMultiplierY</key>
 				<integer>30</integer>
+				<key>FingerTrackingMaxDistance</key>
+				<integer>400</integer>
+				<key>CoordinateSmoothingEnabled</key>
+				<true/>
 			</dict>
 			<key>IOClass</key>
 			<string>RMIBus</string>
