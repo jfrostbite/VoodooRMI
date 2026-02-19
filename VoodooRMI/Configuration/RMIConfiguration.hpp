@@ -63,6 +63,9 @@ struct RmiConfiguration {
     uint8_t palmRejectionHeight {80};
     uint8_t palmRejectionHeightTrackpoint {20};
     RmiForceTouchMode forceTouchType {RMI_FT_CLICK_AND_SIZE};
+    // Finger tracking stabilization
+    uint32_t fingerTrackingMaxDistance {400};      // Max distance for finger matching across frames
+    bool coordinateSmoothingEnabled {true};        // Enable EMA coordinate smoothing
 };
 
 // Data for F30 and F3A
