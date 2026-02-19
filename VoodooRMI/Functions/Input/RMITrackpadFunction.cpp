@@ -22,14 +22,10 @@ OSDefineMetaClassAndStructors(RMITrackpadFunction, RMIFunction)
 #define RMI_MT2_MAX_PRESSURE 255
 #define cfgToPercent(val) ((double)val / 100.0)
 
-// Coordinate smoothing parameters
-#define RMI_SMOOTHING_ALPHA_MAX 0.7  // Normal smoothing (responsive)
-#define RMI_SMOOTHING_ALPHA_MIN 0.25 // Aggressive smoothing for close fingers
-#define RMI_SMOOTHING_PROXIMITY_THRESHOLD                                      \
-  150 // Below this inter-finger distance, increase smoothing
-#define RMI_SMOOTHING_MAX_JUMP                                                 \
-  100                  // Skip smoothing for large intentional movements
-#define RMI_DEADZONE 3 // Minimum movement to register (sensor units)
+// Coordinate smoothing: EMA factor (0.0 = full smoothing, 1.0 = no smoothing)
+#define RMI_SMOOTHING_ALPHA 0.7
+// Skip smoothing if distance exceeds this (large intentional movement)
+#define RMI_SMOOTHING_MAX_JUMP 100
 
     static void fillZone(RMI2DSensorZone *zone, int min_x, int min_y, int max_x,
                          int max_y) {
@@ -191,7 +187,7 @@ void RMITrackpadFunction::handleReport(RMI2DSensorReport *report) {
     UInt16 smoothedX = obj.x;
     UInt16 smoothedY = obj.y;
     if (conf.coordinateSmoothingEnabled && fingerState[i] == RMI_FINGER_VALID) {
-      applyCoordinateSmoothing(i, smoothedX, smoothedY, report, maxIdx);
+      applyCoordinateSmoothing(i, smoothedX, smoothedY);
     }
 
     transducer.isTransducerActive = true;
@@ -600,19 +596,12 @@ void RMITrackpadFunction::remapFingerIndices(RMI2DSensorReport *report) {
 
 /**
  * applyCoordinateSmoothing
- * Applies adaptive EMA filtering to finger coordinates.
- *
- * Key features:
- * - Proximity-adaptive alpha: when fingers are close together, uses much
- *   stronger smoothing (lower alpha) to counteract capacitive cross-talk noise.
- * - Deadzone filter: movements below RMI_DEADZONE are completely suppressed.
- * - Anomalous jump rejection: if a finger appears to jump toward another
- *   finger's position (likely a firmware index swap), the jump is rejected.
+ * Applies Exponential Moving Average (EMA) filtering to finger coordinates.
+ * Alpha = 0.7 provides a good balance between responsiveness and smoothness.
+ * Skips smoothing for large movements (intentional fast gestures).
  */
 void RMITrackpadFunction::applyCoordinateSmoothing(int fingerIdx, UInt16 &x,
-                                                   UInt16 &y,
-                                                   RMI2DSensorReport *report,
-                                                   size_t maxIdx) {
+                                                   UInt16 &y) {
   TrackedFinger &tracked = trackedFingers[fingerIdx];
 
   if (!tracked.hasSmoothedCoords) {
@@ -628,92 +617,16 @@ void RMITrackpadFunction::applyCoordinateSmoothing(int fingerIdx, UInt16 &x,
   double distSq = dx * dx + dy * dy;
   double maxJumpSq = (double)RMI_SMOOTHING_MAX_JUMP * RMI_SMOOTHING_MAX_JUMP;
 
-  // Deadzone: suppress micro-movements entirely
-  if (distSq < (double)(RMI_DEADZONE * RMI_DEADZONE)) {
-    x = (UInt16)(tracked.smoothedX + 0.5);
-    y = (UInt16)(tracked.smoothedY + 0.5);
-    return;
-  }
-
   if (distSq > maxJumpSq) {
-    // Check if this jump moves toward another finger (anomalous swap)
-    bool jumpTowardsOther = false;
-    for (size_t j = 0; j < maxIdx; j++) {
-      if ((int)j == fingerIdx)
-        continue;
-      rmi_2d_sensor_abs_object &other = report->objs[j];
-      if (other.type != RMI_2D_OBJECT_FINGER &&
-          other.type != RMI_2D_OBJECT_STYLUS)
-        continue;
-
-      // Distance from new position to other finger
-      double dxOther = (double)x - (double)other.x;
-      double dyOther = (double)y - (double)other.y;
-      double distToOtherSq = dxOther * dxOther + dyOther * dyOther;
-
-      // Distance from old position to other finger
-      double dxOldOther = tracked.smoothedX - (double)other.x;
-      double dyOldOther = tracked.smoothedY - (double)other.y;
-      double distOldToOtherSq =
-          dxOldOther * dxOldOther + dyOldOther * dyOldOther;
-
-      // If new position is much closer to another finger than old position was,
-      // this is likely a swap — reject the jump
-      if (distToOtherSq < distOldToOtherSq * 0.5) {
-        jumpTowardsOther = true;
-        IOLogDebug("Rejecting anomalous jump on finger %d toward finger %ld",
-                   fingerIdx, j);
-        break;
-      }
-    }
-
-    if (jumpTowardsOther) {
-      // Reject: keep previous smoothed position
-      x = (UInt16)(tracked.smoothedX + 0.5);
-      y = (UInt16)(tracked.smoothedY + 0.5);
-      return;
-    }
-
-    // Genuine large movement — snap to new position
+    // Large movement — don't smooth, just snap to new position
     tracked.smoothedX = (double)x;
     tracked.smoothedY = (double)y;
   } else {
-    // Calculate adaptive alpha based on minimum inter-finger distance
-    double alpha = RMI_SMOOTHING_ALPHA_MAX;
-
-    if (maxIdx >= 2) {
-      double minInterFingerDistSq = 1e9;
-      for (size_t j = 0; j < maxIdx; j++) {
-        if ((int)j == fingerIdx)
-          continue;
-        rmi_2d_sensor_abs_object &other = report->objs[j];
-        if (other.type != RMI_2D_OBJECT_FINGER &&
-            other.type != RMI_2D_OBJECT_STYLUS)
-          continue;
-
-        double ifDx = (double)x - (double)other.x;
-        double ifDy = (double)y - (double)other.y;
-        double ifDistSq = ifDx * ifDx + ifDy * ifDy;
-        if (ifDistSq < minInterFingerDistSq)
-          minInterFingerDistSq = ifDistSq;
-      }
-
-      double minInterFingerDist = minInterFingerDistSq < 1e9
-                                      ? __builtin_sqrt(minInterFingerDistSq)
-                                      : 1e4;
-
-      if (minInterFingerDist < RMI_SMOOTHING_PROXIMITY_THRESHOLD) {
-        // Linearly interpolate alpha: closer fingers → more smoothing
-        double t =
-            minInterFingerDist / (double)RMI_SMOOTHING_PROXIMITY_THRESHOLD;
-        alpha = RMI_SMOOTHING_ALPHA_MIN +
-                t * (RMI_SMOOTHING_ALPHA_MAX - RMI_SMOOTHING_ALPHA_MIN);
-      }
-    }
-
     // Apply EMA: smoothed = alpha * raw + (1 - alpha) * previous
-    tracked.smoothedX = alpha * (double)x + (1.0 - alpha) * tracked.smoothedX;
-    tracked.smoothedY = alpha * (double)y + (1.0 - alpha) * tracked.smoothedY;
+    tracked.smoothedX = RMI_SMOOTHING_ALPHA * (double)x +
+                        (1.0 - RMI_SMOOTHING_ALPHA) * tracked.smoothedX;
+    tracked.smoothedY = RMI_SMOOTHING_ALPHA * (double)y +
+                        (1.0 - RMI_SMOOTHING_ALPHA) * tracked.smoothedY;
   }
 
   x = (UInt16)(tracked.smoothedX + 0.5);

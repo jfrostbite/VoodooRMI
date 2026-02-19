@@ -118,8 +118,7 @@ private:
   // Finger tracking stabilization
   TrackedFinger trackedFingers[MAX_FINGERS];
   void remapFingerIndices(RMI2DSensorReport *report);
-  void applyCoordinateSmoothing(int fingerIdx, UInt16 &x, UInt16 &y,
-                                RMI2DSensorReport *report, size_t maxIdx);
+  void applyCoordinateSmoothing(int fingerIdx, UInt16 &x, UInt16 &y);
 
   MT2FingerType getFingerType();
   size_t checkInZone(VoodooInputTransducer &obj);
