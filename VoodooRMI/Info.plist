@@ -37,7 +37,7 @@
 				<key>MinYDiffThumbDetection</key>
 				<integer>200</integer>
 				<key>PalmRejectionHeight</key>
-				<integer>80</integer>
+				<integer>60</integer>
 				<key>PalmRejectionTrackpointHeight</key>
 				<integer>20</integer>
 				<key>PalmRejectionWidth</key>
